@@ -18,6 +18,10 @@
 #include <QtTest/QtTest>
 #include "eventdispatcher.h"
 
+#if QT_VERSION < 0x050000
+typedef qptrdiff qintptr;
+#endif
+
 class tst_Epoll3 : public QObject {
 	Q_OBJECT
 public:
