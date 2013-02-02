@@ -1,7 +1,7 @@
 CONFIG  += console link_prl
 CONFIG  -= app_bundle
 TEMPLATE = app
-DESTDIR  = $$OUT_PWD/bin
+DESTDIR  = $$OUT_PWD
 
 lessThan(QT_MAJOR_VERSION, 5) {
 	CONFIG += qtestlib
