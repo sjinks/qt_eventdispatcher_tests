@@ -35,7 +35,7 @@ class Issue3Tester : public QObject {
 	Q_OBJECT
 public:
 	explicit Issue3Tester(QObject* parent = 0)
-		: QObject(parent), m_server(new QTcpServer(this)), m_sn1(0), m_sn2(0), m_in1(false), m_in2(false)
+		: QObject(parent), m_server(new QTcpServer()), m_sn1(0), m_sn2(0), m_in1(false), m_in2(false)
 	{
 		this->m_server->listen(QHostAddress::LocalHost);
 		QObject::connect(this->m_server, SIGNAL(newConnection()), this, SLOT(handleNewConnection()));
@@ -63,6 +63,12 @@ public:
 		this->m_sn1->setEnabled(true);
 		this->m_sn2->setEnabled(true);
 		QCoreApplication::processEvents();
+	}
+
+	virtual ~Issue3Tester(void)
+	{
+		delete this->m_server;
+		this->m_server = 0;
 	}
 
 private:
