@@ -566,9 +566,9 @@ void tst_QEventLoop::processEventsExcludeTimers()
 
     // normal process events will send timers
     eventLoop.processEvents(QEventLoop::X11ExcludeTimers);
-#if !defined(Q_OS_UNIX)
-    QEXPECT_FAIL("", "X11ExcludeTimers only works on UN*X", Continue);
-#endif
+//#if !defined(Q_OS_UNIX)
+//    QEXPECT_FAIL("", "X11ExcludeTimers only works on UN*X", Continue);
+//#endif
     QCOMPARE(timerReceiver.gotTimerEvent, -1);
     timerReceiver.gotTimerEvent = -1;
 
