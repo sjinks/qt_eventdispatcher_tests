@@ -59,7 +59,8 @@
 #include <unistd.h>
 #endif
 
-#include "../../shared/util.h"
+#include "util.h"
+#include "eventdispatcher.h"
 
 //TESTED_CLASS=
 //TESTED_FILES=
