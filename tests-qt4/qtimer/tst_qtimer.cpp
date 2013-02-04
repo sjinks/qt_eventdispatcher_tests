@@ -428,7 +428,30 @@ void tst_QTimer::deleteLaterOnQTimer()
 
 void tst_QTimer::moveToThread()
 {
-    QSKIP("This test runs in a thread", SkipAll);
+    QTimer ti1;
+    QTimer ti2;
+    ti1.start(MOVETOTHREAD_TIMEOUT);
+    ti2.start(MOVETOTHREAD_TIMEOUT);
+    QVERIFY((ti1.timerId() & 0xffffff) != (ti2.timerId() & 0xffffff));
+    QThread tr;
+    ti1.moveToThread(&tr);
+    connect(&ti1,SIGNAL(timeout()), &tr, SLOT(quit()));
+    tr.start();
+    QTimer ti3;
+    ti3.start(MOVETOTHREAD_TIMEOUT);
+    QVERIFY((ti3.timerId() & 0xffffff) != (ti2.timerId() & 0xffffff));
+    QVERIFY((ti3.timerId() & 0xffffff) != (ti1.timerId() & 0xffffff));
+    QTest::qWait(MOVETOTHREAD_WAIT);
+    QVERIFY(tr.wait());
+    ti2.stop();
+    QTimer ti4;
+    ti4.start(MOVETOTHREAD_TIMEOUT);
+    ti3.stop();
+    ti2.start(MOVETOTHREAD_TIMEOUT);
+    ti3.start(MOVETOTHREAD_TIMEOUT);
+    QVERIFY((ti4.timerId() & 0xffffff) != (ti2.timerId() & 0xffffff));
+    QVERIFY((ti3.timerId() & 0xffffff) != (ti2.timerId() & 0xffffff));
+    QVERIFY((ti3.timerId() & 0xffffff) != (ti1.timerId() & 0xffffff));
 }
 
 class RestartedTimerFiresTooSoonObject : public QObject
@@ -543,9 +566,43 @@ void tst_QTimer::timerFiresOnlyOncePerProcessEvents()
     QCOMPARE(longSlot.count, 1);
 }
 
+class TimerIdPersistsAfterThreadExitThread : public QThread
+{
+public:
+    QTimer *timer;
+    int timerId, returnValue;
+
+    TimerIdPersistsAfterThreadExitThread()
+        : QThread(), timer(0), timerId(-1), returnValue(-1)
+    { }
+    ~TimerIdPersistsAfterThreadExitThread()
+    {
+        delete timer;
+    }
+
+    void run()
+    {
+        QEventLoop eventLoop;
+        timer = new QTimer;
+        connect(timer, SIGNAL(timeout()), &eventLoop, SLOT(quit()));
+        timer->start(100);
+        timerId = timer->timerId();
+        returnValue = eventLoop.exec();
+    }
+};
+
 void tst_QTimer::timerIdPersistsAfterThreadExit()
 {
-    QSKIP("This test runs in a thread", SkipAll);
+    TimerIdPersistsAfterThreadExitThread thread;
+    thread.start();
+    QVERIFY(thread.wait(30000));
+    QCOMPARE(thread.returnValue, 0);
+
+    // even though the thread has exited, and the event dispatcher destroyed, the timer is still
+    // "active", meaning the timer id should NOT be reused (i.e. the event dispatcher should not
+    // have unregistered it)
+    int timerId = thread.startTimer(100);
+    QVERIFY((timerId & 0xffffff) != (thread.timerId & 0xffffff));
 }
 
 void tst_QTimer::cancelLongTimer()

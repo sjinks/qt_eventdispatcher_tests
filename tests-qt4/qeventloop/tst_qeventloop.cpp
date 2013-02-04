@@ -59,8 +59,7 @@
 #include <unistd.h>
 #endif
 
-#include "eventdispatcher.h"
-#include "util.h"
+#include "../../shared/util.h"
 
 //TESTED_CLASS=
 //TESTED_FILES=
@@ -199,6 +198,9 @@ public slots:
     void cleanup();
 private slots:
     // This test *must* run first. See the definition for why.
+    void onlySymbianActiveScheduler();
+    void symbianNestedActiveSchedulerLoop_data();
+    void symbianNestedActiveSchedulerLoop();
     void processEvents();
     void exec();
     void reexec();
@@ -277,6 +279,52 @@ private:
     int notifierCount;
 };
 #endif
+
+void tst_QEventLoop::onlySymbianActiveScheduler() {
+#ifndef Q_OS_SYMBIAN
+    QSKIP("This is a Symbian-only test.", SkipAll);
+#else
+    // In here we try to use timers and sockets exclusively using the Symbian
+    // active scheduler and no processEvents().
+    // This test should therefore be run first, so that we can verify that
+    // the first occurrence of processEvents does not do any initialization that
+    // we depend on.
+
+    // Open up a pipe so we can test socket notifiers.
+    int pipeEnds[2];
+    if (::pipe(pipeEnds) != 0) {
+        QFAIL("Could not open pipe");
+    }
+    QSocketNotifier notifier(pipeEnds[0], QSocketNotifier::Read);
+    QSignalSpy notifierSpy(&notifier, SIGNAL(activated(int)));
+    char dummy = 1;
+    ::write(pipeEnds[1], &dummy, 1);
+
+    QTimer zeroTimer;
+    QSignalSpy zeroTimerSpy(&zeroTimer, SIGNAL(timeout()));
+    zeroTimer.setInterval(0);
+    zeroTimer.start();
+
+    QTimer timer;
+    QSignalSpy timerSpy(&timer, SIGNAL(timeout()));
+    timer.setInterval(2000); // Generous timeout or this test will fail if there is high load
+    timer.start();
+
+    OnlySymbianActiveScheduler_helper helper(pipeEnds[0], &zeroTimer);
+    connect(&notifier, SIGNAL(activated(int)), &helper, SLOT(notifierSlot()));
+    connect(&zeroTimer, SIGNAL(timeout()), &helper, SLOT(zeroTimerSlot()));
+    connect(&timer, SIGNAL(timeout()), &helper, SLOT(timerSlot()));
+
+    CActiveScheduler::Start();
+
+    ::close(pipeEnds[1]);
+    ::close(pipeEnds[0]);
+
+    QCOMPARE(notifierSpy.count(), 2);
+    QCOMPARE(zeroTimerSpy.count(), 2);
+    QCOMPARE(timerSpy.count(), 2);
+#endif
+}
 
 void tst_QEventLoop::processEvents()
 {
@@ -513,9 +561,92 @@ void tst_QEventLoop::customEvent(QEvent *e)
     }
 }
 
+class SocketEventsTester: public QObject
+{
+    Q_OBJECT
+public:
+    SocketEventsTester()
+    {
+        socket = 0;
+        server = 0;
+        dataArrived = false;
+        testResult = false;
+    }
+    ~SocketEventsTester()
+    {
+        delete socket;
+        delete server;
+    }
+    bool init()
+    {
+        bool ret = false;
+        server = new QTcpServer();
+        socket = new QTcpSocket();
+        connect(server, SIGNAL(newConnection()), this, SLOT(sendHello()));
+        connect(socket, SIGNAL(readyRead()), this, SLOT(sendAck()), Qt::DirectConnection);
+        if((ret = server->listen(QHostAddress::LocalHost, 0))) {
+            socket->connectToHost(server->serverAddress(), server->serverPort());
+            socket->waitForConnected();
+        }
+        return ret;
+    }
+
+    QTcpSocket *socket;
+    QTcpServer *server;
+    bool dataArrived;
+    bool testResult;
+public slots:
+    void sendAck()
+    {
+        dataArrived = true;
+    }
+    void sendHello()
+    {
+        char data[10] ="HELLO";
+        qint64 size = sizeof(data);
+
+        QTcpSocket *serverSocket = server->nextPendingConnection();
+        serverSocket->write(data, size);
+        serverSocket->flush();
+        QEventLoop loop;
+        QTimer::singleShot(200, &loop, SLOT(quit())); //allow the TCP/IP stack time to loopback the data, so our socket is ready to read
+        loop.exec(QEventLoop::ExcludeSocketNotifiers);
+        testResult = dataArrived;
+        QTimer::singleShot(200, &loop, SLOT(quit()));
+        loop.exec(); //check the deferred event is processed
+        serverSocket->close();
+        QThread::currentThread()->exit(0);
+    }
+};
+
+class SocketTestThread : public QThread
+{
+    Q_OBJECT
+public:
+    SocketTestThread():QThread(0),testResult(false){};
+    void run()
+    {
+        SocketEventsTester *tester = new SocketEventsTester();
+        if (tester->init())
+            exec();
+        testResult = tester->testResult;
+        dataArrived = tester->dataArrived;
+        delete tester;
+    }
+     bool testResult;
+     bool dataArrived;
+};
+
 void tst_QEventLoop::processEventsExcludeSocket()
 {
-    QSKIP("This test runs in a thread", SkipAll);
+#if defined(Q_WS_QWS)
+    QSKIP("Socket message seems to be leaking through QEventLoop::exec(ExcludeSocketNotifiers) on qws (QTBUG-19699)", SkipAll);
+#endif
+    SocketTestThread thread;
+    thread.start();
+    QVERIFY(thread.wait());
+    QVERIFY(!thread.testResult);
+    QVERIFY(thread.dataArrived);
 }
 
 class TimerReceiver : public QObject
@@ -559,11 +690,240 @@ void tst_QEventLoop::processEventsExcludeTimers()
     timerReceiver.gotTimerEvent = -1;
 }
 
-void tst_QEventLoop::deliverInDefinedOrder_QTBUG19637()
+#ifdef Q_OS_SYMBIAN
+class DummyActiveObject : public CActive
 {
-    QSKIP("This test runs in a thread", SkipAll);
+public:
+    DummyActiveObject(int levels);
+    ~DummyActiveObject();
+
+    void Start();
+
+protected:
+    void DoCancel();
+    void RunL();
+
+public:
+    bool succeeded;
+
+private:
+    RTimer m_rTimer;
+    int remainingLevels;
+};
+
+class ActiveSchedulerLoop : public QObject
+{
+public:
+    ActiveSchedulerLoop(int levels) : succeeded(false), timerId(-1), remainingLevels(levels) {}
+    ~ActiveSchedulerLoop() {}
+
+    void timerEvent(QTimerEvent *e);
+
+public:
+    bool succeeded;
+    int timerId;
+    int remainingLevels;
+};
+
+DummyActiveObject::DummyActiveObject(int levels)
+    : CActive(CActive::EPriorityStandard),
+      succeeded(false),
+      remainingLevels(levels)
+{
+    m_rTimer.CreateLocal();
 }
 
+DummyActiveObject::~DummyActiveObject()
+{
+    Cancel();
+    m_rTimer.Close();
+}
+
+void DummyActiveObject::DoCancel()
+{
+    m_rTimer.Cancel();
+}
+
+void DummyActiveObject::RunL()
+{
+    if (remainingLevels - 1 <= 0) {
+        ActiveSchedulerLoop loop(remainingLevels - 1);
+        loop.timerId = loop.startTimer(0);
+        QCoreApplication::processEvents();
+
+        succeeded = loop.succeeded;
+    } else {
+        succeeded = true;
+    }
+    CActiveScheduler::Stop();
+}
+
+void DummyActiveObject::Start()
+{
+    m_rTimer.After(iStatus, 100000); // 100 ms
+    SetActive();
+}
+
+void ActiveSchedulerLoop::timerEvent(QTimerEvent *e)
+{
+    Q_UNUSED(e);
+    DummyActiveObject *dummy = new(ELeave) DummyActiveObject(remainingLevels);
+    CActiveScheduler::Add(dummy);
+
+    dummy->Start();
+
+    CActiveScheduler::Start();
+
+    succeeded = dummy->succeeded;
+
+    delete dummy;
+
+    killTimer(timerId);
+}
+
+// We cannot trap panics when the test case fails, so run it in a different thread instead.
+class ActiveSchedulerThread : public QThread
+{
+public:
+    ActiveSchedulerThread(QEventLoop::ProcessEventsFlag flags);
+    ~ActiveSchedulerThread();
+
+protected:
+    void run();
+
+public:
+    volatile bool succeeded;
+
+private:
+    QEventLoop::ProcessEventsFlag m_flags;
+};
+
+ActiveSchedulerThread::ActiveSchedulerThread(QEventLoop::ProcessEventsFlag flags)
+    : succeeded(false),
+      m_flags(flags)
+{
+}
+
+ActiveSchedulerThread::~ActiveSchedulerThread()
+{
+}
+
+void ActiveSchedulerThread::run()
+{
+    ActiveSchedulerLoop loop(2);
+    loop.timerId = loop.startTimer(0);
+    // It may panic in here if the active scheduler and the Qt loop don't go together.
+    QCoreApplication::processEvents(m_flags);
+
+    succeeded = loop.succeeded;
+}
+#endif // ifdef Q_OS_SYMBIAN
+
+void tst_QEventLoop::symbianNestedActiveSchedulerLoop_data()
+{
+    QTest::addColumn<int>("processEventFlags");
+
+    QTest::newRow("AllEvents") << (int)QEventLoop::AllEvents;
+    QTest::newRow("WaitForMoreEvents") << (int)QEventLoop::WaitForMoreEvents;
+}
+
+/*
+  Before you start fiddling with this test, you should have a good understanding of how
+  Symbian active objects work. What the test does is to try to screw up the semaphore count
+  in the active scheduler to cause stray signals, by running the Qt event loop and the
+  active scheduler inside each other. Naturally, its attempts to do this should be futile!
+*/
+void tst_QEventLoop::symbianNestedActiveSchedulerLoop()
+{
+#ifndef Q_OS_SYMBIAN
+    QSKIP("This is a Symbian only test.", SkipAll);
+#else
+    QFETCH(int, processEventFlags);
+
+    ActiveSchedulerThread thread((QEventLoop::ProcessEventsFlag)processEventFlags);
+    thread.start();
+    thread.wait(2000);
+
+    QVERIFY(thread.succeeded);
+#endif
+}
+
+Q_DECLARE_METATYPE(QThread*)
+
+namespace DeliverInDefinedOrder_QTBUG19637 {
+    enum { NbThread = 3,  NbObject = 500, NbEventQueue = 5, NbEvent = 50 };
+
+    struct CustomEvent : public QEvent {
+        CustomEvent(int q, int v) : QEvent(Type(User + q)), value(v) {}
+        int value;
+    };
+
+    struct Object : public QObject {
+        Q_OBJECT
+    public:
+        Object() : count(0) {
+            for (int i = 0; i < NbEventQueue;  i++)
+                lastReceived[i] = -1;
+        }
+        int lastReceived[NbEventQueue];
+        int count;
+        virtual void customEvent(QEvent* e) {
+            QVERIFY(e->type() >= QEvent::User);
+            QVERIFY(e->type() < QEvent::User + 5);
+            uint idx = e->type() - QEvent::User;
+            int value = static_cast<CustomEvent *>(e)->value;
+            QVERIFY(lastReceived[idx] < value);
+            lastReceived[idx] = value;
+            count++;
+        }
+
+    public slots:
+        void moveToThread(QThread *t) {
+            QObject::moveToThread(t);
+        }
+        void processEvents() {
+            // Process all events for this thread
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 30000);
+        }
+    };
+
+}
+
+void tst_QEventLoop::deliverInDefinedOrder_QTBUG19637()
+{
+    using namespace DeliverInDefinedOrder_QTBUG19637;
+    qMetaTypeId<QThread*>();
+    QThread threads[NbThread];
+    Object objects[NbObject];
+    for (int t = 0; t < NbThread; t++) {
+        threads[t].start();
+    }
+
+    int event = 0;
+
+    for (int o = 0; o < NbObject; o++) {
+        objects[o].moveToThread(&threads[o % NbThread]);
+        for (int e = 0; e < NbEvent; e++) {
+            int q = e % NbEventQueue;
+            QCoreApplication::postEvent(&objects[o], new CustomEvent(q, ++event) , q);
+            if (e % 7)
+                QMetaObject::invokeMethod(&objects[o], "moveToThread", Qt::QueuedConnection, Q_ARG(QThread*, &threads[(e+o)%NbThread]));
+        }
+    }
+
+    for (int o = 0; o < NbObject; o++) {
+        // Wait until all events processed
+        QMetaObject::invokeMethod(&objects[o], "processEvents", Qt::BlockingQueuedConnection);
+        // Test event count
+        QTRY_COMPARE(objects[o].count, int(NbEvent));
+    }
+
+    for (int t = 0; t < NbThread; t++) {
+        threads[t].quit();
+        threads[t].wait();
+    }
+
+}
 
 #include "tst_qeventloop.moc"
 
