@@ -428,6 +428,7 @@ void tst_QTimer::deleteLaterOnQTimer()
 
 void tst_QTimer::moveToThread()
 {
+#if QT_VERSION >= 0x040500
     QTimer ti1;
     QTimer ti2;
     ti1.start(MOVETOTHREAD_TIMEOUT);
@@ -452,6 +453,9 @@ void tst_QTimer::moveToThread()
     QVERIFY((ti4.timerId() & 0xffffff) != (ti2.timerId() & 0xffffff));
     QVERIFY((ti3.timerId() & 0xffffff) != (ti2.timerId() & 0xffffff));
     QVERIFY((ti3.timerId() & 0xffffff) != (ti1.timerId() & 0xffffff));
+#else
+    QSKIP("Won't work in Qt < 4.5", SkipAll);
+#endif
 }
 
 class RestartedTimerFiresTooSoonObject : public QObject

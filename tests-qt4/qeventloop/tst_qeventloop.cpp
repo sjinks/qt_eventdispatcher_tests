@@ -646,6 +646,10 @@ void tst_QEventLoop::processEventsExcludeSocket()
     SocketTestThread thread;
     thread.start();
     QVERIFY(thread.wait());
+#if QT_VERSION >= 0x040800 && QT_VERSION <= 0x040804
+    // See https://bugreports.qt-project.org/browse/QTBUG-19699?focusedCommentId=181310&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-181310
+    QEXPECT_FAIL("", "Fails in Qt 4.8.x, see https://bugreports.qt-project.org/browse/QTBUG-19699", Continue);
+#endif
     QVERIFY(!thread.testResult);
     QVERIFY(thread.dataArrived);
 }
@@ -892,6 +896,9 @@ namespace DeliverInDefinedOrder_QTBUG19637 {
 
 void tst_QEventLoop::deliverInDefinedOrder_QTBUG19637()
 {
+#if QT_VERSION < 0x040800
+    QSKIP("This test fails in Qt < 4.8", SkipAll);
+#else
     using namespace DeliverInDefinedOrder_QTBUG19637;
     qMetaTypeId<QThread*>();
     QThread threads[NbThread];
@@ -923,7 +930,7 @@ void tst_QEventLoop::deliverInDefinedOrder_QTBUG19637()
         threads[t].quit();
         threads[t].wait();
     }
-
+#endif
 }
 
 #include "tst_qeventloop.moc"
