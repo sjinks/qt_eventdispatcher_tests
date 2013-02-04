@@ -50,9 +50,16 @@
 #include <QtNetwork/QTcpSocket>
 #include <private/qnativesocketengine_p.h>
 #define NATIVESOCKETENGINE QNativeSocketEngine
+#ifdef Q_OS_UNIX
 #include <private/qnet_unix_p.h>
 #include <sys/select.h>
+#endif
 #include <limits>
+
+#if defined (Q_CC_MSVC) && defined(max)
+#  undef max
+#  undef min
+#endif // Q_CC_MSVC
 
 #include "eventdispatcher.h"
 
