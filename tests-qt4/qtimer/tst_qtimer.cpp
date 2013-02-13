@@ -492,7 +492,6 @@ public:
 
         m_timer.stop();
 
-        QTime now = QTime::currentTime();
         int elapsed = m_startedTime.elapsed();
 
         if (elapsed < m_interval / 2) {
