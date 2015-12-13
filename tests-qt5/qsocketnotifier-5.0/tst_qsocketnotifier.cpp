@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+** Copyright (C) 2012 Digia Plc and/or its subsidiary(-ies).
 ** Contact: http://www.qt-project.org/legal
 **
 ** This file is part of the test suite of the Qt Toolkit.
@@ -60,6 +60,8 @@
 #  undef max
 #  undef min
 #endif // Q_CC_MSVC
+
+#include "eventdispatcher.h"
 
 class tst_QSocketNotifier : public QObject
 {
@@ -303,5 +305,12 @@ void tst_QSocketNotifier::posixSockets()
 }
 #endif
 
-QTEST_MAIN(tst_QSocketNotifier)
 #include <tst_qsocketnotifier.moc>
+
+int main(int argc, char** argv)
+{
+    QCoreApplication::setEventDispatcher(new EventDispatcher);
+    QCoreApplication app(argc, argv);
+    tst_QSocketNotifier t;
+    return QTest::qExec(&t, argc, argv);
+}

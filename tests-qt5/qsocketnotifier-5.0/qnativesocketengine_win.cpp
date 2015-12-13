@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+** Copyright (C) 2012 Digia Plc and/or its subsidiary(-ies).
 ** Contact: http://www.qt-project.org/legal
 **
 ** This file is part of the QtNetwork module of the Qt Toolkit.
@@ -1450,7 +1450,7 @@ int QNativeSocketEnginePrivate::nativeSelect(int timeout, bool selectForRead) co
     bool readEnabled = selectForRead && readNotifier && readNotifier->isEnabled();
     if (readEnabled)
         readNotifier->setEnabled(false);
-
+    
     fd_set fds;
 
     int ret = 0;
