@@ -13,5 +13,11 @@ greaterThan(QT_MINOR_VERSION, 5) {
 
 # qsocketnotifier depends on Qt 4.8's privates
 unix:greaterThan(QT_MINOR_VERSION, 7) {
-	SUBDIRS += qsocketnotifier
+	greaterThan(QT_PATCH_VERSION, 4) {
+		# Fix forQt 4.8.5+
+		SUBDIRS += qsocketnotifier-4.8.5
+	}
+	else {
+		SUBDIRS += qsocketnotifier
+	}
 }
