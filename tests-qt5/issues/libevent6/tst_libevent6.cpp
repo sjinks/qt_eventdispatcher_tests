@@ -16,13 +16,8 @@ private Q_SLOTS:
 
 int main(int argc, char** argv)
 {
-#if QT_VERSION < 0x050000
-	EventDispatcher d;
-	dispatcher = &d;
-#else
 	dispatcher = new EventDispatcher();
 	QCoreApplication::setEventDispatcher(dispatcher);
-#endif
 	QCoreApplication app(argc, argv);
 	LibEventIssue6Test t;
 	return QTest::qExec(&t, argc, argv);
