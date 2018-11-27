@@ -5,5 +5,6 @@ SUBDIRS  = \
 
 greaterThan(QT_MAJOR_VERSION, 4) {
 	SUBDIRS += \
-		libevent6
+		libevent6 \
+		libevent4
 }
